@@ -2,10 +2,10 @@
   "name": "api-proxy-server",
   "version": "1.0.0",
   "description": "Proxy server for API requests",
-  "main": "api.js.js",
+  "main": "api.js",
   "scripts": {
-    "start": "node api.js.js",
-    "dev": "nodemon api.js.js"
+    "start": "node api.js",
+    "dev": "nodemon api.js"
   },
   "dependencies": {
     "express": "^4.18.2",
