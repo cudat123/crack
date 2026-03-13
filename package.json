@@ -1,7 +1,7 @@
 {
   "name": "game-predictor-api",
   "version": "1.0.0",
-  "description": "API dự đoán game Tài Xỉu - Bypass referer",
+  "description": "API dự đoán game Tài Xỉu - Thu thập lịch sử tự động",
   "main": "api.js",
   "scripts": {
     "start": "node api.js",
@@ -12,8 +12,8 @@
     "game",
     "predictor",
     "tai-xiu",
-    "bypass",
-    "api"
+    "api",
+    "bypass"
   ],
   "author": "TIENDAT",
   "license": "MIT",
@@ -26,9 +26,5 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/tiendat/game-predictor.git"
-  },
-  "bugs": {
-    "url": "https://github.com/tiendat/game-predictor/issues"
-  },
-  "homepage": "https://github.com/tiendat/game-predictor#readme"
+  }
 }
