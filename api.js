@@ -2,33 +2,29 @@ const express = require('express');
 const https = require('https');
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 // Config các game
 const GAMES = {
     lc79: {
         api: '/lc79_api.php',
         predict: '/predictor.php',
-        host: 'phanmemgame.com',
-        name: 'LC79'
+        host: 'phanmemgame.com'
     },
     '68gb': {
         api: '/68gb_api.php',
         predict: '/predictor.php',
-        host: 'phanmemgame.com',
-        name: '68 GAME BÀI'
+        host: 'phanmemgame.com'
     },
     sunwin: {
         api: '/sunwin_api.php',
         predict: '/predictor.php',
-        host: 'phanmemgame.com',
-        name: 'SUNWIN'
+        host: 'phanmemgame.com'
     },
     son789: {
         api: '/son789_api.php',
         predict: '/predictor.php',
-        host: 'phanmemgame.com',
-        name: 'SON789'
+        host: 'phanmemgame.com'
     }
 };
 
@@ -39,20 +35,15 @@ const HEADERS = {
     'Origin': 'https://phanmemgame.com'
 };
 
-// Lưu data từng game
-let gameStates = {};
+// Lưu data
+let gameData = {};
+let gameHistory = {};
 
 Object.keys(GAMES).forEach(game => {
-    gameStates[game] = {
-        currentData: null,
-        phien_hien_tai: null,
-        du_doan: null,
-        do_tin_cay: null,
-        history: []
-    };
+    gameData[game] = null;
+    gameHistory[game] = [];
 });
 
-// Middleware
 app.use(express.json());
 
 // Hàm fetch API gốc
@@ -66,7 +57,7 @@ function fetchGameData(gameId) {
         headers: HEADERS
     };
     
-    const req = https.request(options, (res) => {
+    const reqFetch = https.request(options, (res) => {
         let data = '';
         
         res.on('data', chunk => data += chunk);
@@ -75,26 +66,34 @@ function fetchGameData(gameId) {
             try {
                 const json = JSON.parse(data);
                 
-                // Lưu current data
-                gameStates[gameId].currentData = json;
+                // Lưu data hiện tại
+                gameData[gameId] = json;
                 
-                // Lưu history
+                // Lưu history nếu có phiên mới
                 if (json.Phien) {
-                    gameStates[gameId].history.push({
-                        Phien: json.Phien,
-                        Ket_qua: json.Ket_qua,
-                        Tong: json.Tong
-                    });
+                    // Kiểm tra xem phiên này đã có chưa
+                    const exists = gameHistory[gameId].some(h => h.Phien === json.Phien);
                     
-                    if (gameStates[gameId].history.length > 30) {
-                        gameStates[gameId].history.shift();
+                    if (!exists) {
+                        gameHistory[gameId].push({
+                            Phien: json.Phien,
+                            Ket_qua: json.Ket_qua,
+                            Tong: json.Tong,
+                            Xuc_xac_1: json.Xuc_xac_1,
+                            Xuc_xac_2: json.Xuc_xac_2,
+                            Xuc_xac_3: json.Xuc_xac_3
+                        });
+                        
+                        console.log(`📝 [${gameId}] Thêm history phiên ${json.Phien}`);
                     }
                     
-                    // Gọi dự đoán
-                    setTimeout(() => predictGame(gameId), 15000);
+                    // Giữ 50 phiên gần nhất
+                    if (gameHistory[gameId].length > 50) {
+                        gameHistory[gameId].shift();
+                    }
                 }
                 
-                console.log(`✅ [${gameId}] Phiên ${json.Phien}: ${json.Tong} - ${json.Ket_qua}`);
+                console.log(`✅ [${gameId}] Phiên ${json.Phien}: ${json.Ket_qua} (${json.Tong})`);
                 
             } catch (e) {
                 console.log(`❌ [${gameId}] Lỗi:`, e.message);
@@ -102,109 +101,130 @@ function fetchGameData(gameId) {
         });
     });
     
-    req.on('error', (e) => {
+    reqFetch.on('error', (e) => {
         console.log(`❌ [${gameId}] Lỗi fetch:`, e.message);
     });
     
-    req.end();
+    reqFetch.end();
 }
 
-// Hàm dự đoán
-function predictGame(gameId) {
-    const game = GAMES[gameId];
-    const state = gameStates[gameId];
-    
-    if (!state.currentData || state.history.length < 3) return;
-    
-    const postData = 'history=' + encodeURIComponent(JSON.stringify(state.history));
-    
-    const options = {
-        hostname: game.host,
-        path: game.predict,
-        method: 'POST',
-        headers: {
-            ...HEADERS,
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'Content-Length': Buffer.byteLength(postData)
-        }
-    };
-    
-    const req = https.request(options, (res) => {
-        let data = '';
+// Hàm gọi predictor riêng
+function callPredictor(gameId, historyData) {
+    return new Promise((resolve, reject) => {
+        const game = GAMES[gameId];
         
-        res.on('data', chunk => data += chunk);
+        // Chuẩn bị history đúng format tụi nó cần
+        const formattedHistory = historyData.map(h => ({
+            session: h.Phien,
+            result: h.Ket_qua,
+            totalScore: h.Tong
+        }));
         
-        res.on('end', () => {
-            try {
-                const result = JSON.parse(data);
-                
-                // Cập nhật các trường riêng lẻ
-                state.phien_hien_tai = state.currentData.Phien + 1;
-                state.du_doan = result.prediction || '???';
-                state.do_tin_cay = result.confidence || 0;
-                
-                console.log(`🔮 [${gameId}] Dự đoán: ${result.prediction} (${result.confidence}%)`);
-                
-            } catch (e) {
-                console.log(`❌ [${gameId}] Lỗi predict:`, e.message);
+        const postData = 'history=' + encodeURIComponent(JSON.stringify(formattedHistory));
+        
+        const options = {
+            hostname: game.host,
+            path: game.predict,
+            method: 'POST',
+            headers: {
+                ...HEADERS,
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Content-Length': Buffer.byteLength(postData)
             }
+        };
+        
+        const reqPredict = https.request(options, (response) => {
+            let data = '';
+            
+            response.on('data', chunk => data += chunk);
+            
+            response.on('end', () => {
+                try {
+                    const result = JSON.parse(data);
+                    resolve(result);
+                } catch (e) {
+                    reject(e);
+                }
+            });
         });
+        
+        reqPredict.on('error', reject);
+        reqPredict.write(postData);
+        reqPredict.end();
     });
-    
-    req.on('error', (e) => {
-        console.log(`❌ [${gameId}] Lỗi predict:`, e.message);
-    });
-    
-    req.write(postData);
-    req.end();
 }
 
-// API trả về JSON theo đúng format mới
+// API lấy data game kèm dự đoán
 Object.keys(GAMES).forEach(gameId => {
-    app.get(`/api/${gameId}`, (req, res) => {
-        const state = gameStates[gameId];
+    app.get(`/api/${gameId}`, async (req, res) => {
+        const currentData = gameData[gameId];
         
-        if (!state.currentData) {
+        if (!currentData) {
             return res.json({
                 message: 'Đang lấy dữ liệu...',
                 status: 'loading'
             });
         }
         
-        // Tạo response theo đúng format yêu cầu
-        const responseData = {
-            Phien: state.currentData.Phien,
-            Xuc_xac_1: state.currentData.Xuc_xac_1,
-            Xuc_xac_2: state.currentData.Xuc_xac_2,
-            Xuc_xac_3: state.currentData.Xuc_xac_3,
-            Tong: state.currentData.Tong,
-            Ket_qua: state.currentData.Ket_qua,
-            id: state.currentData.id || "Cskhtool11",
-            updatedAt: state.currentData.updatedAt || new Date().toISOString(),
-            phien_hien_tai: state.phien_hien_tai || state.currentData.Phien + 1,
-            du_doan: state.du_doan || "Đang tính...",
-            do_tin_cay: state.do_tin_cay || 0
-        };
-        
-        res.json(responseData);
+        try {
+            let du_doan_goc = null;
+            
+            // Chỉ gọi predictor nếu có ít nhất 3 phiên history
+            if (gameHistory[gameId].length >= 3) {
+                du_doan_goc = await callPredictor(gameId, gameHistory[gameId]);
+                console.log(`🔮 [${gameId}] Dự đoán:`, du_doan_goc);
+            } else {
+                console.log(`⏳ [${gameId}] Đang thu thập history... (${gameHistory[gameId].length}/3)`);
+            }
+            
+            res.json({
+                ...currentData,
+                du_doan_goc: du_doan_goc,
+                so_luong_history: gameHistory[gameId].length
+            });
+            
+        } catch (e) {
+            res.json({
+                ...currentData,
+                du_doan_goc: { error: 'predict_failed', message: e.message },
+                so_luong_history: gameHistory[gameId].length
+            });
+        }
     });
 });
 
-// API riêng lấy dự đoán
+// API riêng để xem history
 Object.keys(GAMES).forEach(gameId => {
-    app.get(`/api/${gameId}/du-doan`, (req, res) => {
-        const state = gameStates[gameId];
-        
+    app.get(`/api/${gameId}/history`, (req, res) => {
         res.json({
-            phien_hien_tai: state.phien_hien_tai,
-            du_doan: state.du_doan,
-            do_tin_cay: state.do_tin_cay,
-            thoi_gian: new Date().toLocaleTimeString('vi-VN')
+            game: gameId,
+            history: gameHistory[gameId],
+            so_luong: gameHistory[gameId].length
         });
     });
 });
 
-// Chạy fetch cho tất cả game
+// API gọi predictor riêng
+Object.keys(GAMES).forEach(gameId => {
+    app.get(`/api/${gameId}/predict`, async (req, res) => {
+        if (gameHistory[gameId].length < 3) {
+            return res.json({
+                message: 'Cần thêm history',
+                current: gameHistory[gameId].length,
+                need: 3
+            });
+        }
+        
+        try {
+            const result = await callPredictor(gameId, gameHistory[gameId]);
+            res.json(result);
+        } catch (e) {
+            res.status(500).json({ error: e.message });
+        }
+    });
+});
+
+// Fetch data mỗi 3 giây
 Object.keys(GAMES).forEach(gameId => {
     setInterval(() => fetchGameData(gameId), 3000);
 });
@@ -220,6 +240,7 @@ app.listen(PORT, () => {
     console.log(`🚀 Server chạy ở http://localhost:${PORT}`);
     console.log('📊 Các game:');
     Object.keys(GAMES).forEach(game => {
-        console.log(`   - ${GAMES[game].name}: http://localhost:${PORT}/api/${game}`);
+        console.log(`   - ${game}: http://localhost:${PORT}/api/${game}`);
     });
+    console.log('\n⏳ Cần ít nhất 3 phiên để dự đoán...');
 });
