@@ -1,226 +1,225 @@
 const express = require('express');
-const axios = require('axios');
-const cors = require('cors');
-const dotenv = require('dotenv');
+const https = require('https');
 
-dotenv.config();
 const app = express();
+const PORT = 3000;
 
-// Cấu hình CORS - chỉ cho phép domain cụ thể nếu cần
-const corsOptions = {
-  origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+// Config các game
+const GAMES = {
+    lc79: {
+        api: '/lc79_api.php',
+        predict: '/predictor.php',
+        host: 'phanmemgame.com',
+        name: 'LC79'
+    },
+    '68gb': {
+        api: '/68gb_api.php',
+        predict: '/predictor.php',
+        host: 'phanmemgame.com',
+        name: '68 GAME BÀI'
+    },
+    sunwin: {
+        api: '/sunwin_api.php',
+        predict: '/predictor.php',
+        host: 'phanmemgame.com',
+        name: 'SUNWIN'
+    },
+    son789: {
+        api: '/son789_api.php',
+        predict: '/predictor.php',
+        host: 'phanmemgame.com',
+        name: 'SON789'
+    }
 };
 
-app.use(cors(corsOptions));
+// Header fake
+const HEADERS = {
+    'Referer': 'https://phanmemgame.com/',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    'Origin': 'https://phanmemgame.com'
+};
+
+// Lưu data từng game
+let gameStates = {};
+
+Object.keys(GAMES).forEach(game => {
+    gameStates[game] = {
+        currentData: null,
+        phien_hien_tai: null,
+        du_doan: null,
+        do_tin_cay: null,
+        history: []
+    };
+});
+
+// Middleware
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
-// Middleware xử lý headers
-app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
-  next();
-});
-
-// Route proxy chính
-app.get('/api/sunwin', async (req, res) => {
-  try {
-    const apiUrl = 'https://astshop.io.vn/';
+// Hàm fetch API gốc
+function fetchGameData(gameId) {
+    const game = GAMES[gameId];
     
-    // Lấy tất cả query parameters từ request
-    const params = { ...req.query };
-    
-    // Đảm bảo có param 'api' = 'sunwin'
-    params.api = 'sunwin';
-    
-    // Tạo headers với danh tính của astshop.io.vn
-    const headers = {
-      'Host': 'astshop.io.vn',
-      'Origin': 'https://astshop.io.vn',
-      'Referer': 'https://astshop.io.vn/',
-      'User-Agent': req.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept': req.headers['accept'] || 'application/json, text/plain, */*',
-      'Accept-Language': req.headers['accept-language'] || 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
-      'Accept-Encoding': req.headers['accept-encoding'] || 'gzip, deflate, br',
-      'Connection': 'keep-alive',
-      'Sec-Fetch-Dest': 'empty',
-      'Sec-Fetch-Mode': 'cors',
-      'Sec-Fetch-Site': 'same-origin',
-      'Cache-Control': 'no-cache',
-      'Pragma': 'no-cache'
+    const options = {
+        hostname: game.host,
+        path: game.api + '?t=' + Date.now(),
+        method: 'GET',
+        headers: HEADERS
     };
-
-    // Thêm Authorization header nếu có
-    if (req.headers.authorization) {
-      headers['Authorization'] = req.headers.authorization;
-    }
-
-    // Gọi API
-    const response = await axios.get(apiUrl, {
-      params: params,
-      headers: headers,
-      timeout: 30000 // 30 seconds
-    });
-
-    // Trả về response từ API
-    res.status(response.status).json(response.data);
     
-  } catch (error) {
-    console.error('Proxy error:', error.message);
-    
-    if (error.response) {
-      // API trả về lỗi
-      res.status(error.response.status).json({
-        error: true,
-        message: error.response.data?.message || 'API Error',
-        status: error.response.status,
-        data: error.response.data
-      });
-    } else if (error.request) {
-      // Không nhận được response
-      res.status(504).json({
-        error: true,
-        message: 'Gateway Timeout - No response from target API',
-        code: 'PROXY_TIMEOUT'
-      });
-    } else {
-      // Lỗi khác
-      res.status(500).json({
-        error: true,
-        message: error.message,
-        code: 'PROXY_ERROR'
-      });
-    }
-  }
-});
-
-// Route cho POST requests (nếu API hỗ trợ)
-app.post('/api/sunwin', async (req, res) => {
-  try {
-    const apiUrl = 'https://astshop.io.vn/';
-    
-    const headers = {
-      'Host': 'astshop.io.vn',
-      'Origin': 'https://astshop.io.vn',
-      'Referer': 'https://astshop.io.vn/',
-      'User-Agent': req.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      'Content-Type': req.headers['content-type'] || 'application/json',
-      'Accept': 'application/json, text/plain, */*'
-    };
-
-    // Thêm Authorization nếu có
-    if (req.headers.authorization) {
-      headers['Authorization'] = req.headers.authorization;
-    }
-
-    const response = await axios.post(apiUrl, req.body, {
-      params: { api: 'sunwin' },
-      headers: headers,
-      timeout: 30000
-    });
-
-    res.status(response.status).json(response.data);
-    
-  } catch (error) {
-    console.error('POST Proxy error:', error.message);
-    handleAxiosError(error, res);
-  }
-});
-
-// Route health check
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'OK',
-    timestamp: new Date().toISOString(),
-    service: 'API Proxy Server',
-    version: '1.0.0'
-  });
-});
-
-// Route test proxy
-app.get('/test', async (req, res) => {
-  try {
-    // Test kết nối đến API
-    const testResponse = await axios.get('https://astshop.io.vn/', {
-      params: { api: 'sunwin' },
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Origin': 'https://astshop.io.vn',
-        'Referer': 'https://astshop.io.vn/'
-      },
-      timeout: 10000
+    const req = https.request(options, (res) => {
+        let data = '';
+        
+        res.on('data', chunk => data += chunk);
+        
+        res.on('end', () => {
+            try {
+                const json = JSON.parse(data);
+                
+                // Lưu current data
+                gameStates[gameId].currentData = json;
+                
+                // Lưu history
+                if (json.Phien) {
+                    gameStates[gameId].history.push({
+                        Phien: json.Phien,
+                        Ket_qua: json.Ket_qua,
+                        Tong: json.Tong
+                    });
+                    
+                    if (gameStates[gameId].history.length > 30) {
+                        gameStates[gameId].history.shift();
+                    }
+                    
+                    // Gọi dự đoán
+                    setTimeout(() => predictGame(gameId), 15000);
+                }
+                
+                console.log(`✅ [${gameId}] Phiên ${json.Phien}: ${json.Tong} - ${json.Ket_qua}`);
+                
+            } catch (e) {
+                console.log(`❌ [${gameId}] Lỗi:`, e.message);
+            }
+        });
     });
     
-    res.json({
-      success: true,
-      message: 'Proxy server is working',
-      apiStatus: testResponse.status,
-      proxyUrl: `${req.protocol}://${req.get('host')}/api/sunwin`
+    req.on('error', (e) => {
+        console.log(`❌ [${gameId}] Lỗi fetch:`, e.message);
     });
-  } catch (error) {
-    res.json({
-      success: false,
-      message: 'Cannot connect to target API',
-      error: error.message
-    });
-  }
-});
-
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({
-    error: true,
-    message: 'Route not found',
-    availableRoutes: [
-      'GET /api/sunwin',
-      'POST /api/sunwin',
-      'GET /health',
-      'GET /test'
-    ]
-  });
-});
-
-// Error handler
-app.use((err, req, res, next) => {
-  console.error('Server error:', err);
-  res.status(500).json({
-    error: true,
-    message: 'Internal server error',
-    details: process.env.NODE_ENV === 'development' ? err.message : undefined
-  });
-});
-
-// Hàm xử lý lỗi axios
-function handleAxiosError(error, res) {
-  if (error.response) {
-    res.status(error.response.status).json({
-      error: true,
-      message: error.response.data?.message || 'API Error',
-      status: error.response.status
-    });
-  } else if (error.request) {
-    res.status(504).json({
-      error: true,
-      message: 'Gateway Timeout',
-      code: 'PROXY_TIMEOUT'
-    });
-  } else {
-    res.status(500).json({
-      error: true,
-      message: error.message,
-      code: 'PROXY_ERROR'
-    });
-  }
+    
+    req.end();
 }
 
-// Khởi động server
-const PORT = process.env.PORT || 3000;
-const HOST = process.env.HOST || '0.0.0.0';
+// Hàm dự đoán
+function predictGame(gameId) {
+    const game = GAMES[gameId];
+    const state = gameStates[gameId];
+    
+    if (!state.currentData || state.history.length < 3) return;
+    
+    const postData = 'history=' + encodeURIComponent(JSON.stringify(state.history));
+    
+    const options = {
+        hostname: game.host,
+        path: game.predict,
+        method: 'POST',
+        headers: {
+            ...HEADERS,
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Content-Length': Buffer.byteLength(postData)
+        }
+    };
+    
+    const req = https.request(options, (res) => {
+        let data = '';
+        
+        res.on('data', chunk => data += chunk);
+        
+        res.on('end', () => {
+            try {
+                const result = JSON.parse(data);
+                
+                // Cập nhật các trường riêng lẻ
+                state.phien_hien_tai = state.currentData.Phien + 1;
+                state.du_doan = result.prediction || '???';
+                state.do_tin_cay = result.confidence || 0;
+                
+                console.log(`🔮 [${gameId}] Dự đoán: ${result.prediction} (${result.confidence}%)`);
+                
+            } catch (e) {
+                console.log(`❌ [${gameId}] Lỗi predict:`, e.message);
+            }
+        });
+    });
+    
+    req.on('error', (e) => {
+        console.log(`❌ [${gameId}] Lỗi predict:`, e.message);
+    });
+    
+    req.write(postData);
+    req.end();
+}
 
-app.listen(PORT, HOST, () => {
-  console.log(`🚀 Proxy server running on http://${HOST}:${PORT}`);
-  console.log(`📡 API Endpoint: http://${HOST}:${PORT}/api/sunwin`);
-  console.log(`🏥 Health check: http://${HOST}:${PORT}/health`);
-  console.log(`🔧 Test endpoint: http://${HOST}:${PORT}/test`);
+// API trả về JSON theo đúng format mới
+Object.keys(GAMES).forEach(gameId => {
+    app.get(`/api/${gameId}`, (req, res) => {
+        const state = gameStates[gameId];
+        
+        if (!state.currentData) {
+            return res.json({
+                message: 'Đang lấy dữ liệu...',
+                status: 'loading'
+            });
+        }
+        
+        // Tạo response theo đúng format yêu cầu
+        const responseData = {
+            Phien: state.currentData.Phien,
+            Xuc_xac_1: state.currentData.Xuc_xac_1,
+            Xuc_xac_2: state.currentData.Xuc_xac_2,
+            Xuc_xac_3: state.currentData.Xuc_xac_3,
+            Tong: state.currentData.Tong,
+            Ket_qua: state.currentData.Ket_qua,
+            id: state.currentData.id || "Cskhtool11",
+            updatedAt: state.currentData.updatedAt || new Date().toISOString(),
+            phien_hien_tai: state.phien_hien_tai || state.currentData.Phien + 1,
+            du_doan: state.du_doan || "Đang tính...",
+            do_tin_cay: state.do_tin_cay || 0
+        };
+        
+        res.json(responseData);
+    });
+});
+
+// API riêng lấy dự đoán
+Object.keys(GAMES).forEach(gameId => {
+    app.get(`/api/${gameId}/du-doan`, (req, res) => {
+        const state = gameStates[gameId];
+        
+        res.json({
+            phien_hien_tai: state.phien_hien_tai,
+            du_doan: state.du_doan,
+            do_tin_cay: state.do_tin_cay,
+            thoi_gian: new Date().toLocaleTimeString('vi-VN')
+        });
+    });
+});
+
+// Chạy fetch cho tất cả game
+Object.keys(GAMES).forEach(gameId => {
+    setInterval(() => fetchGameData(gameId), 3000);
+});
+
+// Fetch lần đầu
+setTimeout(() => {
+    Object.keys(GAMES).forEach(gameId => {
+        fetchGameData(gameId);
+    });
+}, 1000);
+
+app.listen(PORT, () => {
+    console.log(`🚀 Server chạy ở http://localhost:${PORT}`);
+    console.log('📊 Các game:');
+    Object.keys(GAMES).forEach(game => {
+        console.log(`   - ${GAMES[game].name}: http://localhost:${PORT}/api/${game}`);
+    });
 });
